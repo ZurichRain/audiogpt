@@ -1,0 +1,42 @@
+{
+    "data":{
+        "data_root": "/data/hypertext/sharpwang/dataset/TTS/Genshin_Dataset/paimeng",
+        "max_wav_value": 32768.0,
+        "sampling_rate": 48000,
+        "filter_length": 2048,
+        "hop_length": 512,
+        "win_length": 2048,
+        "n_mel_channels": 128,
+        "mel_fmin": 0.0,
+        "mel_fmax": null,
+        "add_blank": true,
+        "n_speakers": 256,
+        "cleaned_text": true,
+        "spk2id": {
+            "P1": 0
+        },
+        "audio_patch_token_id": 32000,
+        "audio_start_token_id": 32001,
+        "audio_end_token": 32002,
+        "conversation_datasets":true,
+        "use_audio_start_end": false
+    },
+    "model" :{
+        "model_name_or_path":"/data/hypertext/sharpwang/llm/llama-vicuna-7b",
+        "AudioEncoderPath":null,
+        "pretrained_stage1_model": null,
+        "cache_dir": null,
+        "model_max_length":512,
+        "bf16":true,
+        "freeze_audio_encoder": true,
+        "freeze_lm_model": true,
+        "use_audio_start_end": false,
+        "audio_select_layer":-1
+
+    },
+    "train":{
+        "cache_dir":null,
+        "fp16": false,
+        "bf16": true
+    }
+}
