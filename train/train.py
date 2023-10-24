@@ -35,6 +35,7 @@ from config.configs import dataConfig
 
 from Audiogpt.model.AudiogptBase import *
 from Audiogpt.data.AudioDataset import AudioDataset
+import random
 
 
 
@@ -73,11 +74,23 @@ def make_supervised_data_module(model_args, tokenizer, data_args):
                 eval_dataset=None,
                 data_collator=data_collator)
 
+def seed_everything(seed=1226):
+
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # some cudnn methods can be random even after fixing the seed
+    # unless you tell it to be deterministic
+    torch.backends.cudnn.deterministic = True 
+
 def train():
 
     # model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     
-    
+    seed_everything()
     with open("/data/hypertext/sharpwang/TTS/Audiogpt/config/config.json","r") as f:
         config_dict = json.load(f) 
 

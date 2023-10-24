@@ -47,9 +47,11 @@ class AudioDataset(Dataset):
         #                 )
         self.tokenizer = tokenizer
 
-        train_data_path = config.data_root + "/meta_data.json"
+        train_data_path = config.data_root + "/meta_1_data.json"
         with open(train_data_path,'r') as f:
             self.train_data=json.load(f)
+        
+        # print(self.train_data[0])
         
         self._filter()
 
@@ -144,6 +146,12 @@ class AudioDataset(Dataset):
                 qalis:[[q,a],[q,a]]
                 wavid:xxx
             }
+
+            {
+                id:xx
+                qalis:[[q,a],[q,a]]
+                wavid:xxx
+            }
         '''
         c_data = self.train_data[index]
 
@@ -162,10 +170,10 @@ class AudioDataset(Dataset):
         
 
         for idx, question_answer in enumerate(conversations):
-            cur_question = question_answer[0]
-            cur_answer = question_answer[1]
+            cur_question = question_answer[0].strip()
+            cur_answer = question_answer[1].strip()
             
-            cur_instruct = "Human: " + cur_question + "Assistant: "
+            cur_instruct = "### Human: " + cur_question + "### Assistant: "
             all_cur_seq = cur_instruct + cur_answer + "</s>"
 
             # answer 内部添加 特殊token <SPST> <audio> <SPED> 
@@ -174,11 +182,13 @@ class AudioDataset(Dataset):
 
             # print(cur_instruct)
             # print(all_cur_seq)
+            # print(cur_answer + "</s>")
             
-            # import ipdb; ipdb.set_trace()
+            
             cur_round_instruct_ids = self.tokenizer(cur_instruct).input_ids
             cur_round_answer_ids = self.tokenizer(cur_answer+"</s>").input_ids
-            cur_round_input_ids = self.tokenizer(all_cur_seq).input_ids
+            # cur_round_input_ids = self.tokenizer(all_cur_seq).input_ids
+            cur_round_input_ids = cur_round_instruct_ids + cur_round_answer_ids[1:]
 
             # print(self.tokenizer.convert_ids_to_tokens(cur_round_input_ids))
             cur_round_target_ids = copy.deepcopy(cur_round_input_ids)
@@ -187,8 +197,16 @@ class AudioDataset(Dataset):
             # print(cura)
             # c_target = ids_input_1.clone()
             # cur_round_target_ids[:-len(cur_round_answer_ids)+1] = -100
+            # print(cur_round_input_ids)
+            # print(cur_round_instruct_ids)
+            # print(cur_round_answer_ids)
+            # import ipdb; ipdb.set_trace()
+            # exit()
             
-            for c_idx in range(len(cur_round_target_ids)-(len(cur_round_answer_ids)-1)):
+            # for c_idx in range(len(cur_round_target_ids)-(len(cur_round_answer_ids)-1)):
+            #     cur_round_target_ids[c_idx] = -100
+            
+            for c_idx in range(len(cur_round_instruct_ids)):
                 cur_round_target_ids[c_idx] = -100
 
             # print(cur_round_instruct_ids)
@@ -205,21 +223,26 @@ class AudioDataset(Dataset):
         
         # print(input_ids)
         # print(target_ids)
+        # exit()
         
         audio_token_id = self.tokenizer.convert_tokens_to_ids(["<audio>"])[0]
+
         aft_input_ids = []
+        aft_target_ids = []
         audio_st = []
         audio_idx_cnt = 0
         for idx, c_id in enumerate(input_ids):
             if c_id == audio_token_id:
                 aft_input_ids += [ audio_token_id ] * (spec.size()[1])
-                target_ids = target_ids[:idx]+[-100]*(spec.size()[1])+target_ids[idx+1:]
+                # target_ids = target_ids[:idx]+[-100]*(spec.size()[1])+target_ids[idx+1:]
+                aft_target_ids += [-100]*(spec.size()[1])
                 audio_st.append(audio_idx_cnt)
                 audio_idx_cnt+=spec.size()[1]
             else:
                 aft_input_ids.append(c_id)
+                aft_target_ids.append(target_ids[idx])
                 audio_idx_cnt+=1
-        assert len(target_ids) == len(aft_input_ids), print(len(target_ids)," ",len(aft_input_ids))
+        assert len(aft_target_ids) == len(aft_input_ids), print(len(aft_target_ids)," ",len(aft_input_ids))
         
             # print(spec.size())
             # print(audio_norm.size())
@@ -246,7 +269,7 @@ class AudioDataset(Dataset):
         # }
         result = dict(
             input_ids=torch.tensor(aft_input_ids),
-            labels=torch.tensor(target_ids),
+            labels=torch.tensor(aft_target_ids),
             audios=[spec.transpose(0, 1)], # len(<audio_path>),spec_len,1025
             audio_lens=[spec.size()[1]], # len(<audio_path>)
             audio_start= audio_st,
@@ -274,18 +297,20 @@ if __name__ == "__main__":
                             padding_side= "right",
                             use_fast= False,
                         )
-    tokenizer.add_special_tokens({
-                "eos_token": "</s>",
-                "bos_token": "</s>",
-                "unk_token": "<unk>",
-            })
+    # tokenizer.add_special_tokens({
+    #             "eos_token": "</s>",
+    #             "bos_token": "</s>",
+    #             "unk_token": "<unk>",
+    #         })
+    tokenizer.pad_token = tokenizer.unk_token
+    # tokenizer.add_tokens([DEFAULT_AUDIO_PATCH_TOKEN], special_tokens=True)
     
     
     print(len(tokenizer))
     
-    tokenizer.add_tokens("<audio>")
-    tokenizer.add_tokens("<SPST>") # 生成 audio的时候使用
-    tokenizer.add_tokens("<SPED>")
+    tokenizer.add_tokens("<audio>",special_tokens=True)
+    tokenizer.add_tokens("<SPST>",special_tokens=True) # 生成 audio的时候使用
+    tokenizer.add_tokens("<SPED>",special_tokens=True)
 
 
     print(len(tokenizer))

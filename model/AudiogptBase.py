@@ -35,10 +35,14 @@ import transformers
 
 from utils import *
 
+from audio_decoder import SynthesizerTrn
+
 
 DEFAULT_AUDIO_PATCH_TOKEN = "<audio>"
 DEFAULT_AUDIO_START_TOKEN = "<SPST>"
 DEFAULT_AUDIO_END_TOKEN = "<SPED>"
+DEFAULT_AUDIO_DECODER_START_TOKEN = "<DECODER_ST>"
+DEFAULT_AUDIO_DECODER_END_TOKEN = "<DECODER_ED>"
 
 
 
@@ -177,7 +181,7 @@ class AudioLlamaModel(LlamaModel):
             max_len = -1 
             new_input_embeds = []
 
-            for cur_text_ids, cur_text_embeds, cur_audio_features, cur_audio_st in zip(input_ids, inputs_embeds, audio_features_text_emb, audio_start):
+            for cur_text_ids, cur_text_embeds, cur_audio_features, cur_audio_sts in zip(input_ids, inputs_embeds, audio_features_text_emb, audio_start):
 
                 # import ipdb;ipdb.set_trace()
                 if (cur_text_ids == audio_patch_token).sum() == 0:
@@ -186,16 +190,18 @@ class AudioLlamaModel(LlamaModel):
                     continue
 
                 tidx=0
-                for  per_cur_audio_features, audio_st in zip(cur_audio_features, cur_audio_st):
-                    if tidx != len(cur_audio_st)-1:
+                for  per_cur_audio_features, audio_st in zip(cur_audio_features, cur_audio_sts):
+                    if tidx != len(cur_audio_sts)-1:
                         cur_text_embeds = torch.cat(
                                 (
                                     cur_text_embeds[:audio_st], 
                                     per_cur_audio_features, 
-                                    cur_text_embeds[audio_st + per_cur_audio_features.size()[0]: cur_audio_st[tidx+1]]
+                                    cur_text_embeds[audio_st + per_cur_audio_features.size()[0]: cur_audio_sts[tidx+1]]
                                 ), 
                                 dim=0
                             )
+                        assert (cur_text_ids[:audio_st] == audio_patch_token).sum() == 0 and \
+                             (cur_text_ids[audio_st + per_cur_audio_features.size()[0]: cur_audio_sts[tidx+1]] == audio_patch_token).sum() == 0
                     else:
                         cur_text_embeds = torch.cat(
                                 (
@@ -205,6 +211,14 @@ class AudioLlamaModel(LlamaModel):
                                 ), 
                                 dim=0
                             )
+                        # print(cur_text_ids[audio_st:audio_st + per_cur_audio_features.size()[0]])
+                        assert torch.all(cur_text_ids[audio_st:audio_st + per_cur_audio_features.size()[0]].eq(audio_patch_token))
+                        assert (cur_text_ids[:audio_st] == audio_patch_token).sum() == 0 and \
+                             (cur_text_ids[audio_st + per_cur_audio_features.size()[0]:] == audio_patch_token).sum() == 0
+                              
+                        # print(cur_text_ids[:audio_st])
+                        # print(cur_text_ids[audio_st + per_cur_audio_features.size()[0]:])
+                        # import ipdb; ipdb.set_trace()
                         
                     max_len = max(max_len, cur_text_embeds.size()[0])
                     tidx += 1
@@ -215,7 +229,7 @@ class AudioLlamaModel(LlamaModel):
                     
                     
 
-                # cur_all_input_embedding = [cur_text_embeds]
+                # cur_all_input_embedding = [cur_text_embeds] 
 
                 if use_audio_start_end:
                     # TODO
@@ -225,15 +239,15 @@ class AudioLlamaModel(LlamaModel):
                 # cur_all_input_embedding.append(cur_audio_features)
                 new_input_embeds.append(cur_text_embeds)
             # print(max_len)
-            for bidx in range(len(new_input_embeds)):
-                if new_input_embeds[bidx].size()[0] < max_len:
-                    new_input_embeds[bidx]=torch.cat(
-                        (
-                            new_input_embeds[bidx],
-                            torch.zeros(max_len-new_input_embeds[bidx].size()[0], new_input_embeds[bidx].size()[1]).to("cuda")
-                        ),
-                        dim=0
-                    )
+            # for bidx in range(len(new_input_embeds)):
+            #     if new_input_embeds[bidx].size()[0] < max_len:
+            #         new_input_embeds[bidx]=torch.cat(
+            #             (
+            #                 new_input_embeds[bidx],
+            #                 torch.zeros(max_len-new_input_embeds[bidx].size()[0], new_input_embeds[bidx].size()[1]).to("cuda")
+            #             ),
+            #             dim=0
+            #         )
                 
             inputs_embeds=torch.stack(new_input_embeds, dim=0)
 
@@ -404,9 +418,23 @@ class AudioLlamaModel(LlamaModel):
 class AudioGPTLlamaForCausalLM(LlamaForCausalLM):
     config_class = AudioLlamaConfig
 
-    def __init__(self, config):
+    def __init__(self, config, audio_decoder_config=None, audio_decoder_model_config=None):
         super(LlamaForCausalLM, self).__init__(config)
         self.model = AudioLlamaModel(config)
+        # 这里建立一个audio decoder config
+        if audio_decoder_config:
+            self.audio_decoder = SynthesizerTrn(
+                len(audio_decoder_config.symbols),
+                audio_decoder_config.filter_length // 2 + 1,
+                audio_decoder_config.segment_size // audio_decoder_config.hop_length,
+                n_speakers=audio_decoder_config.n_speakers,
+                **audio_decoder_model_config
+            )
+            load_checkpoint(audio_decoder_config.ckp_path, self.audio_decoder, None,skip_optimizer=True)
+
+            self.audio_decoder_projector_layer=nn.Linear(config.hidden_state_size,\
+                                                        audio_decoder_model_config.input_channal_size, bias=False)
+        
 
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
@@ -432,6 +460,10 @@ class AudioGPTLlamaForCausalLM(LlamaForCausalLM):
         audios: Optional[torch.FloatTensor] = None,
         audio_lens: Optional[torch.FloatTensor] = None,
         audio_start = None,
+        y_mel= None,
+        audio_decoder_st=None,
+        audio_decoder_ed=None, 
+
 
         AudioSPSTED = None,
         AudioAnswerEmbedding = None,
@@ -464,7 +496,16 @@ class AudioGPTLlamaForCausalLM(LlamaForCausalLM):
         # 设置两个损失
         logits = self.lm_head(hidden_states)
 
+        # 传递参数的时候传递一个audio st, audio ed
+        # 从hidden state 出发 使用一个adapter到decoder的输入 hidden_state
+        
         loss = None
+        if y_mel:
+            audio_hidden_states = hidden_states[:,audio_decoder_st:audio_decoder_ed,:]
+            audio_hidden_states = self.audio_decoder_projector_layer(audio_hidden_states)
+            y_hat_mel = self.audio_decoder(audio_hidden_states)
+            loss_mel = F.l1_loss(y_mel, y_hat_mel)
+            loss = loss_mel
         if labels is not None:
             # Shift so that tokens < n predict n
             shift_logits = logits[..., :-1, :].contiguous()
@@ -475,7 +516,10 @@ class AudioGPTLlamaForCausalLM(LlamaForCausalLM):
             shift_labels = shift_labels.view(-1)
             # Enable model/pipeline parallelism
             shift_labels = shift_labels.to(shift_logits.device)
-            loss = loss_fct(shift_logits, shift_labels)
+            if y_mel:
+                loss += loss_fct(shift_logits, shift_labels)
+            else:
+                loss = loss_fct(shift_logits, shift_labels)
 
         # TODO 定位<SPGEN>的位置 然后计算Embedding的相似度
         # AudioSPSTED 记录GEN的位置 batchsize, span_size, 2
@@ -541,6 +585,26 @@ class AudioGPTLlamaForCausalLM(LlamaForCausalLM):
         
 
         # add image start token <im_start> and end token <im_end>
+        if config.use_decoder_audio_start_end:
+            num_new_tokens = tokenizer.add_tokens([DEFAULT_AUDIO_DECODER_START_TOKEN, DEFAULT_AUDIO_DECODER_END_TOKEN], special_tokens=True)
+            self.resize_token_embeddings(len(tokenizer))
+            config.audio_start_token, config.audio_end_token = tokenizer.convert_tokens_to_ids([DEFAULT_AUDIO_DECODER_START_TOKEN,\
+                                                                                                 DEFAULT_AUDIO_DECODER_END_TOKEN])
+            
+            if num_new_tokens > 0:
+                input_embeddings = self.get_input_embeddings().weight.data
+                output_embeddings = self.get_output_embeddings().weight.data
+
+                input_embeddings_avg = input_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
+                output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
+
+                input_embeddings[-num_new_tokens:] = input_embeddings_avg
+                output_embeddings[-num_new_tokens:] = output_embeddings_avg
+
+            if freeze_lm_model:
+                self.get_model().num_new_tokens = num_new_tokens
+                self.get_model().orig_embeds_params = self.get_input_embeddings().weight.data.clone().to(device=device)
+        
         if config.use_audio_start_end:
             num_new_tokens = tokenizer.add_tokens([DEFAULT_AUDIO_START_TOKEN, DEFAULT_AUDIO_END_TOKEN], special_tokens=True)
             self.resize_token_embeddings(len(tokenizer))

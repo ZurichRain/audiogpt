@@ -4,13 +4,13 @@
 # --model_name_or_path /data/workspace/data/llm/chatglm2 \
 # --model_name_or_path /mnt/host0/llama-vicuna-7b \
 
-STAGE_1_MODEL_NAME="Audiogpt-7b-stage1-paimeng_v0"
+STAGE_1_MODEL_NAME="Audiogpt-7b-stage1-paimeng_v1_epoch_10_lr_2e-5_seed_1226_sep_by_->"
 STAGE_2_MODEL_NAME="mmgpt-7b-stage2-llava_6k_OCR_2k_Math_200_v2"
 
-torchrun --nnodes=1 --nproc_per_node=1 --master_port=25001 \
+torchrun --nnodes=1 --nproc_per_node=8 --master_port=25001 \
     train/train.py \
     --output_dir ./checkpoints/$STAGE_1_MODEL_NAME \
-    --num_train_epochs 1 \
+    --num_train_epochs 20 \
     --per_device_train_batch_size 16 \
     --per_device_eval_batch_size 2 \
     --gradient_accumulation_steps 1 \
@@ -18,12 +18,11 @@ torchrun --nnodes=1 --nproc_per_node=1 --master_port=25001 \
     --save_strategy "steps" \
     --save_steps 5000 \
     --save_total_limit 1 \
-    --learning_rate 2e-3 \
+    --learning_rate 2e-5 \
     --weight_decay 0. \
     --warmup_ratio 0.03 \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
-    --tf32 True \
     --bf16 True \
     --gradient_checkpointing True \
     --dataloader_num_workers 4 \

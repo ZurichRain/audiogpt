@@ -15,7 +15,7 @@ DEFAULT_AUDIO_PATCH_TOKEN = "<audio>"
 def load_model(model_path):
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
-    model = AudioGPTLlamaForCausalLM.from_pretrained(model_path, torch_dtype=torch.float32, low_cpu_mem_usage=True).to("cuda")
+    model = AudioGPTLlamaForCausalLM.from_pretrained(model_path, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True).to("cuda")
 
     tokenizer.add_tokens([DEFAULT_AUDIO_PATCH_TOKEN], special_tokens=True)
 
@@ -84,7 +84,7 @@ def get_input_for_model(config_data, wav_path, prompt, tokenizer):
     input_ids = []
     # print(config_data)
     spec, audio_norm = get_audio(config_data, wav_path)
-    instruct = "Human: " + prompt + "Assistant:"
+    instruct = "Human: " + prompt + "Assistant: "
     instruct_ids = tokenizer(instruct).input_ids
     # all_instr  = "Human: " + prompt + "Assistant: " + "不得不说，这段文字所讲述的是：咦，蒂玛乌斯先生今天好像不在…</s>" 
     # print(tokenizer("不得不说，这段文字所讲述的是：咦，蒂玛乌斯先生今天好像不在…</s>").input_ids)
@@ -108,16 +108,17 @@ def get_input_for_model(config_data, wav_path, prompt, tokenizer):
             audio_idx_cnt+=1
 
     input_ids= torch.tensor([aft_input_ids]).to("cuda")
+    # print(input_ids)
     # print(spec.dtype)
-    audios=[[spec.transpose(0, 1).to("cuda")]]
+    audios=[[spec.transpose(0, 1).to("cuda", dtype=torch.bfloat16)]]
     audio_lens=[[spec.size()[1]]]
     audio_start= [audio_st]
     return input_ids, audios, audio_lens, audio_start
 
 
-wav_path = "/data/hypertext/sharpwang/TTS/Audiogpt/inference/vo_ABDLQ001_1_paimon_01.wav"
-prompt = "请问下面这段语音的文本内容是什么？<audio>。"
-model_path = "/data/hypertext/sharpwang/TTS/Audiogpt/checkpoints/Audiogpt-7b-stage1-cc_sbu_558k_v0"
+wav_path = "/data/hypertext/sharpwang/TTS/Audiogpt/inference/vo_ABDLQ002_1_paimon_04.wav"
+prompt = "这段音频说了啥？<audio>。"
+model_path = "/data/hypertext/sharpwang/TTS/Audiogpt/checkpoints/Audiogpt-7b-stage1-paimeng_v1_epoch_10_lr_2e-5_seed_1226_sep_by_->"
 
 
 with open("/data/hypertext/sharpwang/TTS/Audiogpt/config/config.json","r") as f:
@@ -139,7 +140,8 @@ ans = model.inference(
     audios=audios,
     audio_lens= audio_lens,
     audio_start=audio_start,
-    tokenizer = tokenizer
+    tokenizer = tokenizer,
+    temperature = 0
 )
 
 print(ans)
