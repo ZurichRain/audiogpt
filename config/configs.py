@@ -1,8 +1,5 @@
 import os
 
-
-
-
 class dataConfig:
     def __init__(self,config_dict) -> None:
         print(config_dict)
